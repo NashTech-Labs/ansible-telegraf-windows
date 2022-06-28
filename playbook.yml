@@ -1,0 +1,4 @@
+# Update host below
+- hosts:
+  roles:
+    - role: telegraf

@@ -1,0 +1,4 @@
+- name: Restart telegraf
+  win_service:
+    name: telegraf
+    state: restarted

@@ -1,0 +1,73 @@
+- name: Gather current telegraf service information
+  ansible.windows.win_service_info:
+    name: telegraf
+  register: telegraf_service_info
+
+- name: Gather current telegraf exe file information
+  ansible.windows.win_stat:
+    path: 'C:\Program Files\telegraf\telegraf.exe'
+    get_checksum: yes
+    checksum_algorithm: sha1
+  register: telegraf_exe_info
+
+- name: Ensure telegraf directories exist
+  ansible.windows.win_file:
+    path: 'C:\Program Files\telegraf\telegraf.d'
+    state: directory
+
+- name: Set telegraf service installation variable
+  set_fact:
+    telegraf_service_exe_path: '"C:\Program Files\telegraf\telegraf.exe" -config "C:\Program Files\telegraf\telegraf.conf" -config-directory "C:\Program Files\telegraf\telegraf.d"'
+
+- name: Stop Service and download exe file
+  block:
+    - name: Stop telegraf service
+      win_service:
+        name: telegraf
+        state: stopped
+      when:
+        - telegraf_service_info.exists == true
+
+    - name: Download telegraf exe file
+      win_get_url:
+        url: "{{ telegraf_intall_url }}"
+        dest: 'C:\Program Files\telegraf\'
+        checksum: "{{ telegraf_binary_checksum }}"
+        checksum_algorithm: sha1
+        force: yes
+
+  when:
+    - telegraf_exe_info.stat.exists == false or telegraf_exe_info.stat.checksum | default('null') != telegraf_binary_checksum
+
+- name: Uninstall telegraf service
+  win_command: '{{ telegraf_service_info.services[0].path }} --service uninstall'
+  when:
+    ((telegraf_exe_info.stat.checksum | default('null') != telegraf_binary_checksum) or (telegraf_service_info.services[0].path | default('null') != telegraf_service_exe_path))
+    and (telegraf_service_info.exists == true)
+  notify: Restart telegraf
+  register: telegraf_uninstall_info
+
+- name: Install telegraf service
+  win_shell: .\telegraf.exe --service install --config "C:\Program Files\telegraf\telegraf.conf" --config-directory "C:\Program Files\telegraf\telegraf.d"
+  args:
+    chdir: C:\Program Files\telegraf
+  when:
+    - telegraf_uninstall_info.changed == True or telegraf_service_info.exists == False
+  notify: Restart telegraf
+
+- name: Start telegraf service
+  win_service:
+    name: telegraf
+    state: started
+
+- name: Gather updated telegraf service information
+  ansible.windows.win_service_info:
+    name: telegraf
+  register: telegraf_updated_service_info
+
+- name: Verify that telegraf service directories are setup correctly
+  assert:
+    that:
+      - telegraf_updated_service_info.services[0].path == telegraf_service_exe_path
+    fail_msg: "telegraf service path is not pointing to the correct configuration file directories."
+    success_msg: "telegraf service path is successfully pointing to the correct configuration file directories."
